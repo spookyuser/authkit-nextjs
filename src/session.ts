@@ -102,7 +102,7 @@ async function updateSessionMiddleware(
     headers.set(signUpPathsHeaderName, signUpPaths.join(','));
   }
 
-  return NextResponse.next({ request: { headers: headers } });
+  return NextResponse.next({ headers });
 }
 
 async function updateSession(

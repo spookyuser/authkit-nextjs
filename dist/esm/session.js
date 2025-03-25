@@ -66,7 +66,7 @@ async function updateSessionMiddleware(request, debug, middlewareAuth, redirectU
     if (signUpPaths.length > 0) {
         headers.set(signUpPathsHeaderName, signUpPaths.join(','));
     }
-    return NextResponse.next({ request: { headers: headers } });
+    return NextResponse.next({ headers });
 }
 async function updateSession(request, options = { debug: false }) {
     const session = await getSessionFromCookie(request);
