@@ -4,11 +4,11 @@ import { sealData, unsealData } from 'iron-session';
 import { createRemoteJWKSet, decodeJwt, jwtVerify } from 'jose';
 import { cookies, headers } from 'next/headers';
 import { redirect } from 'next/navigation';
-import { NextRequest, NextResponse } from 'next/server';
+import { type NextRequest, NextResponse } from 'next/server';
 import { getCookieOptions } from './cookie.js';
 import { WORKOS_CLIENT_ID, WORKOS_COOKIE_NAME, WORKOS_COOKIE_PASSWORD, WORKOS_REDIRECT_URI } from './env-variables.js';
 import { getAuthorizationUrl } from './get-authorization-url.js';
-import {
+import type {
   AccessToken,
   AuthkitMiddlewareAuth,
   AuthkitOptions,
@@ -102,9 +102,7 @@ async function updateSessionMiddleware(
     headers.set(signUpPathsHeaderName, signUpPaths.join(','));
   }
 
-  return NextResponse.next({
-    headers,
-  });
+  return NextResponse.next({ request: { headers: headers } });
 }
 
 async function updateSession(
