@@ -6,6 +6,7 @@ import { cookies, headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { type NextRequest, NextResponse } from 'next/server';
 import { getCookieOptions } from './cookie.js';
+
 import { WORKOS_CLIENT_ID, WORKOS_COOKIE_NAME, WORKOS_COOKIE_PASSWORD, WORKOS_REDIRECT_URI } from './env-variables.js';
 import { getAuthorizationUrl } from './get-authorization-url.js';
 import type {
@@ -82,11 +83,23 @@ async function updateSessionMiddleware(
     return pathRegex.exec(request.nextUrl.pathname);
   });
 
-  const { session, headers, authorizationUrl } = await updateSession(request, {
+  const {
+    session,
+    headers: authHeaders,
+    authorizationUrl,
+  } = await updateSession(request, {
     debug,
     redirectUri,
     screenHint: getScreenHint(signUpPaths, request.nextUrl.pathname),
   });
+
+  // Clone the original request headers so we preserve them while adding our custom ones
+  const newRequestHeaders = new Headers(request.headers);
+
+  // Add our new headers to the cloned request headers
+  for (const [key, value] of authHeaders.entries()) {
+    newRequestHeaders.set(key, value);
+  }
 
   // If the user is logged out and this path isn't on the allowlist for logged out paths, redirect to AuthKit.
   if (middlewareAuth.enabled && matchedPaths.length === 0 && !session.user) {
@@ -94,18 +107,35 @@ async function updateSessionMiddleware(
       console.log(`Unauthenticated user on protected route ${request.url}, redirecting to AuthKit`);
     }
 
-    return redirectWithFallback(authorizationUrl as string, headers);
+    return redirectWithFallback(authorizationUrl as string, newRequestHeaders);
   }
 
   // Record the sign up paths so we can use them later
   if (signUpPaths.length > 0) {
-    headers.set(signUpPathsHeaderName, signUpPaths.join(','));
+    newRequestHeaders.set(signUpPathsHeaderName, signUpPaths.join(','));
   }
 
-  return NextResponse.next({
-    headers,
+  // Create response headers for cookies and other response-specific headers
+  const responseHeaders = new Headers();
+
+  // Copy any Set-Cookie headers or other response-specific headers
+  for (const [key, value] of authHeaders.entries()) {
+    if (key.toLowerCase() === 'set-cookie') {
+      responseHeaders.append(key, value);
+    }
+  }
+
+  console.log('After', {
+    headers: newRequestHeaders,
     request: {
-      headers: headers,
+      headers: newRequestHeaders,
+    },
+  });
+
+  return NextResponse.next({
+    headers: responseHeaders,
+    request: {
+      headers: newRequestHeaders,
     },
   });
 }
@@ -114,28 +144,25 @@ async function updateSession(
   request: NextRequest,
   options: AuthkitOptions = { debug: false },
 ): Promise<AuthkitResponse> {
+  console.log('Before', {
+    request,
+  });
   const session = await getSessionFromCookie(request);
 
-  // Since we're setting the headers in the response, we need to create a new Headers object without copying
-  // the request headers.
-  // See https://github.com/vercel/next.js/issues/50659#issuecomment-2333990159
-  const newRequestHeaders = new Headers();
+  // Create a new Headers object to hold our custom headers
+  // Don't copy request headers here as they'll be managed separately
+  const newHeaders = new Headers();
 
   // Record that the request was routed through the middleware so we can check later for DX purposes
-  newRequestHeaders.set(middlewareHeaderName, 'true');
+  newHeaders.set(middlewareHeaderName, 'true');
 
   // We store the current request url in a custom header, so we can always have access to it
-  // This is because on hard navigations we don't have access to `next-url` but need to get the current
-  // `pathname` to be able to return the users where they came from before sign-in
-  newRequestHeaders.set('x-url', request.url);
+  newHeaders.set('x-url', request.url);
 
   if (options.redirectUri) {
-    // Store the redirect URI in a custom header, so we always have access to it and so that subsequent
-    // calls to `getAuthorizationUrl` will use the same redirect URI
-    newRequestHeaders.set('x-redirect-uri', options.redirectUri);
+    // Store the redirect URI in a custom header
+    newHeaders.set('x-redirect-uri', options.redirectUri);
   }
-
-  newRequestHeaders.delete(sessionHeaderName);
 
   if (!session) {
     if (options.debug) {
@@ -144,7 +171,7 @@ async function updateSession(
 
     return {
       session: { user: null },
-      headers: newRequestHeaders,
+      headers: newHeaders,
       authorizationUrl: await getAuthorizationUrl({
         returnPathname: getReturnPathname(request.url),
         redirectUri: options.redirectUri || WORKOS_REDIRECT_URI,
@@ -158,7 +185,7 @@ async function updateSession(
   const cookieName = WORKOS_COOKIE_NAME || 'wos-session';
 
   if (hasValidSession) {
-    newRequestHeaders.set(sessionHeaderName, request.cookies.get(cookieName)!.value);
+    newHeaders.set(sessionHeaderName, request.cookies.get(cookieName)!.value);
 
     const {
       sid: sessionId,
@@ -179,7 +206,7 @@ async function updateSession(
         impersonator: session.impersonator,
         accessToken: session.accessToken,
       },
-      headers: newRequestHeaders,
+      headers: newHeaders,
     };
   }
 
@@ -211,8 +238,8 @@ async function updateSession(
       impersonator,
     });
 
-    newRequestHeaders.append('Set-Cookie', `${cookieName}=${encryptedSession}; ${getCookieOptions(request.url, true)}`);
-    newRequestHeaders.set(sessionHeaderName, encryptedSession);
+    newHeaders.append('Set-Cookie', `${cookieName}=${encryptedSession}; ${getCookieOptions(request.url, true)}`);
+    newHeaders.set(sessionHeaderName, encryptedSession);
 
     const {
       sid: sessionId,
@@ -233,7 +260,7 @@ async function updateSession(
         impersonator,
         accessToken,
       },
-      headers: newRequestHeaders,
+      headers: newHeaders,
     };
   } catch (e) {
     if (options.debug) {
@@ -242,11 +269,11 @@ async function updateSession(
 
     // When we need to delete a cookie, return it as a header as you can't delete cookies from edge middleware
     const deleteCookie = `${cookieName}=; Expires=${new Date(0).toUTCString()}; ${getCookieOptions(request.url, true, true)}`;
-    newRequestHeaders.append('Set-Cookie', deleteCookie);
+    newHeaders.append('Set-Cookie', deleteCookie);
 
     return {
       session: { user: null },
-      headers: newRequestHeaders,
+      headers: newHeaders,
       authorizationUrl: await getAuthorizationUrl({
         returnPathname: getReturnPathname(request.url),
       }),
