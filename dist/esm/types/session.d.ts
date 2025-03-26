@@ -3,7 +3,6 @@ import type { AuthkitMiddlewareAuth, AuthkitOptions, AuthkitResponse, NoUserInfo
 import type { AuthenticationResponse } from '@workos-inc/node';
 declare function encryptSession(session: Session): Promise<string>;
 declare function updateSessionMiddleware(request: NextRequest, debug: boolean, middlewareAuth: AuthkitMiddlewareAuth, redirectUri: string, signUpPaths: string[]): Promise<Response>;
-declare function updateSession(request: NextRequest, options?: AuthkitOptions): Promise<AuthkitResponse>;
 declare function refreshSession(options: {
     organizationId?: string;
     ensureSignedIn: true;
@@ -21,6 +20,7 @@ declare function withAuth(options?: {
 declare function terminateSession({ returnTo }?: {
     returnTo?: string;
 }): Promise<void>;
+declare function updateSession(request: NextRequest, options?: AuthkitOptions): Promise<AuthkitResponse>;
 /**
  * Saves a WorkOS session to a cookie for use with AuthKit.
  *

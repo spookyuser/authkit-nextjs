@@ -93,109 +93,6 @@ async function updateSessionMiddleware(request, debug, middlewareAuth, redirectU
         },
     });
 }
-async function updateSession(request, options = { debug: false }) {
-    console.log('Before', {
-        request,
-    });
-    const session = await getSessionFromCookie(request);
-    // Create a new Headers object to hold our custom headers
-    // Don't copy request headers here as they'll be managed separately
-    const newHeaders = new Headers();
-    // Record that the request was routed through the middleware so we can check later for DX purposes
-    newHeaders.set(middlewareHeaderName, 'true');
-    // We store the current request url in a custom header, so we can always have access to it
-    newHeaders.set('x-url', request.url);
-    if (options.redirectUri) {
-        // Store the redirect URI in a custom header
-        newHeaders.set('x-redirect-uri', options.redirectUri);
-    }
-    if (!session) {
-        if (options.debug) {
-            console.log('No session found from cookie');
-        }
-        return {
-            session: { user: null },
-            headers: newHeaders,
-            authorizationUrl: await getAuthorizationUrl({
-                returnPathname: getReturnPathname(request.url),
-                redirectUri: options.redirectUri || WORKOS_REDIRECT_URI,
-                screenHint: options.screenHint,
-            }),
-        };
-    }
-    const hasValidSession = await verifyAccessToken(session.accessToken);
-    const cookieName = WORKOS_COOKIE_NAME || 'wos-session';
-    if (hasValidSession) {
-        newHeaders.set(sessionHeaderName, request.cookies.get(cookieName).value);
-        const { sid: sessionId, org_id: organizationId, role, permissions, entitlements, } = decodeJwt(session.accessToken);
-        return {
-            session: {
-                sessionId,
-                user: session.user,
-                organizationId,
-                role,
-                permissions,
-                entitlements,
-                impersonator: session.impersonator,
-                accessToken: session.accessToken,
-            },
-            headers: newHeaders,
-        };
-    }
-    try {
-        if (options.debug) {
-            // istanbul ignore next
-            console.log(`Session invalid. ${session.accessToken ? `Refreshing access token that ends in ${session.accessToken.slice(-10)}` : 'Access token missing.'}`);
-        }
-        const { org_id: organizationIdFromAccessToken } = decodeJwt(session.accessToken);
-        const { accessToken, refreshToken, user, impersonator } = await getWorkOS().userManagement.authenticateWithRefreshToken({
-            clientId: WORKOS_CLIENT_ID,
-            refreshToken: session.refreshToken,
-            organizationId: organizationIdFromAccessToken,
-        });
-        if (options.debug) {
-            console.log('Session successfully refreshed');
-        }
-        // Encrypt session with new access and refresh tokens
-        const encryptedSession = await encryptSession({
-            accessToken,
-            refreshToken,
-            user,
-            impersonator,
-        });
-        newHeaders.append('Set-Cookie', `${cookieName}=${encryptedSession}; ${getCookieOptions(request.url, true)}`);
-        newHeaders.set(sessionHeaderName, encryptedSession);
-        const { sid: sessionId, org_id: organizationId, role, permissions, entitlements, } = decodeJwt(accessToken);
-        return {
-            session: {
-                sessionId,
-                user,
-                organizationId,
-                role,
-                permissions,
-                entitlements,
-                impersonator,
-                accessToken,
-            },
-            headers: newHeaders,
-        };
-    }
-    catch (e) {
-        if (options.debug) {
-            console.log('Failed to refresh. Deleting cookie.', e);
-        }
-        // When we need to delete a cookie, return it as a header as you can't delete cookies from edge middleware
-        const deleteCookie = `${cookieName}=; Expires=${new Date(0).toUTCString()}; ${getCookieOptions(request.url, true, true)}`;
-        newHeaders.append('Set-Cookie', deleteCookie);
-        return {
-            session: { user: null },
-            headers: newHeaders,
-            authorizationUrl: await getAuthorizationUrl({
-                returnPathname: getReturnPathname(request.url),
-            }),
-        };
-    }
-}
 async function refreshSession({ organizationId: nextOrganizationId, ensureSignedIn = false, } = {}) {
     const session = await getSessionFromCookie();
     if (!session) {
@@ -298,6 +195,109 @@ async function verifyAccessToken(accessToken) {
     }
     catch (_a) {
         return false;
+    }
+}
+async function updateSession(request, options = { debug: false }) {
+    console.log('Before', {
+        request,
+    });
+    const session = await getSessionFromCookie(request);
+    // Create a new Headers object to hold our custom headers
+    // Don't copy request headers here as they'll be managed separately
+    const newHeaders = new Headers();
+    // Record that the request was routed through the middleware so we can check later for DX purposes
+    newHeaders.set(middlewareHeaderName, 'true');
+    // We store the current request url in a custom header, so we can always have access to it
+    newHeaders.set('x-url', request.url);
+    if (options.redirectUri) {
+        // Store the redirect URI in a custom header
+        newHeaders.set('x-redirect-uri', options.redirectUri);
+    }
+    if (!session) {
+        if (options.debug) {
+            console.log('No session found from cookie');
+        }
+        return {
+            session: { user: null },
+            headers: newHeaders,
+            authorizationUrl: await getAuthorizationUrl({
+                returnPathname: getReturnPathname(request.url),
+                redirectUri: options.redirectUri || WORKOS_REDIRECT_URI,
+                screenHint: options.screenHint,
+            }),
+        };
+    }
+    const hasValidSession = await verifyAccessToken(session.accessToken);
+    const cookieName = WORKOS_COOKIE_NAME || 'wos-session';
+    if (hasValidSession) {
+        newHeaders.set(sessionHeaderName, request.cookies.get(cookieName).value);
+        const { sid: sessionId, org_id: organizationId, role, permissions, entitlements, } = decodeJwt(session.accessToken);
+        return {
+            session: {
+                sessionId,
+                user: session.user,
+                organizationId,
+                role,
+                permissions,
+                entitlements,
+                impersonator: session.impersonator,
+                accessToken: session.accessToken,
+            },
+            headers: newHeaders,
+        };
+    }
+    try {
+        if (options.debug) {
+            // istanbul ignore next
+            console.log(`Session invalid. ${session.accessToken ? `Refreshing access token that ends in ${session.accessToken.slice(-10)}` : 'Access token missing.'}`);
+        }
+        const { org_id: organizationIdFromAccessToken } = decodeJwt(session.accessToken);
+        const { accessToken, refreshToken, user, impersonator } = await getWorkOS().userManagement.authenticateWithRefreshToken({
+            clientId: WORKOS_CLIENT_ID,
+            refreshToken: session.refreshToken,
+            organizationId: organizationIdFromAccessToken,
+        });
+        if (options.debug) {
+            console.log('Session successfully refreshed');
+        }
+        // Encrypt session with new access and refresh tokens
+        const encryptedSession = await encryptSession({
+            accessToken,
+            refreshToken,
+            user,
+            impersonator,
+        });
+        newHeaders.append('Set-Cookie', `${cookieName}=${encryptedSession}; ${getCookieOptions(request.url, true)}`);
+        newHeaders.set(sessionHeaderName, encryptedSession);
+        const { sid: sessionId, org_id: organizationId, role, permissions, entitlements, } = decodeJwt(accessToken);
+        return {
+            session: {
+                sessionId,
+                user,
+                organizationId,
+                role,
+                permissions,
+                entitlements,
+                impersonator,
+                accessToken,
+            },
+            headers: newHeaders,
+        };
+    }
+    catch (e) {
+        if (options.debug) {
+            console.log('Failed to refresh. Deleting cookie.', e);
+        }
+        // When we need to delete a cookie, return it as a header as you can't delete cookies from edge middleware
+        const deleteCookie = `${cookieName}=; Expires=${new Date(0).toUTCString()}; ${getCookieOptions(request.url, true, true)}`;
+        newHeaders.append('Set-Cookie', deleteCookie);
+        return {
+            session: { user: null },
+            headers: newHeaders,
+            authorizationUrl: await getAuthorizationUrl({
+                returnPathname: getReturnPathname(request.url),
+            }),
+        };
     }
 }
 async function getSessionFromCookie(request) {
